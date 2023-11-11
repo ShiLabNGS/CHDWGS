@@ -59,7 +59,7 @@ perl /storage/shihongjunLab/liulifeng/project/00_llf_workflow_mus_wgs/test/wes_w
 
 
 
-> 所有的脚本都可以在`scripts/`下找到
+> All scripts can be found under `scripts/`
 
 
 
