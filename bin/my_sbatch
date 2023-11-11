@@ -1,0 +1,368 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+=head1 Name
+    sbatch.pl -- control processes running on linux slurm system
+Version
+    Author: Liu Lifeng, liulifeng@westlake.edu.cn
+Usage
+    perl sbatch.pl <jobs.sh>
+    --partition     <str>      Available computing nodes, default intel-e5.
+    --qos           <str>      Set the QoS policy. The default is normal. When -partition amd_debug,Intel_debug, the policy is debug.
+    --cycle_num     <num>      The number of times a circular delivery is made to the cluster, default 3.
+    --maxjob        <num>      Maximum number of tasks to be delivered, default 30.
+    --lines         <num>      The number of rows to run for each task, default 1.
+    --cpus_per_task <num>      The number of CPUs required for each task, default 1.
+    --mem_per_task  <str>      Memory size required for each task, default 2.5G/CPU.
+    --reqsub        <opt>      Repeat delivery or not, default yes.
+    --jobprefix     <str>      Prefix of each sub shell after splitting, default work.
+    --interval      <num>      Query interval of each lines running status, default 120 seconds.
+    --job_cpt_mark  <str>      Set the flag of script running completion. 
+    --show_screen   <opt>      Whether to output the running process on the screen, default None.
+    --getmem        <opt>      Whether to output the requested resource information of each task, default None.
+    --help          <opt>      Output help information, default None.
+Exmple
+    1.Set 1 core 2.5G memory and execute aa.sh script line by line
+        perl sbatch.pl aa.sh
+        <=> perl sbatch.pl -partition intel-e5 --qos normal --cpus_per_task 1 --maxjob 30 --lines 1 aa.sh
+
+    2.Set the number of split rows (2 rows)
+        perl sbatch.pl --lines 2 aa.sh
+
+    3.Run common commands on the terminal. If it is run the day after tomorrow, do not add --show_Screen parameter
+        perl sbatch.pl --getmem --reqsub -partition amd-debug,intel-debug --qos debug --cpus_per_task 1 --mem_per_task 2G,3G --maxjob 3 --lines 2 aa.sh --show_screen 
+
+    4.
+    
+=cut
+
+use Getopt::Long;
+use Cwd qw(abs_path);
+use File::Basename;
+
+# perl sbatch.pl -partition amd-debug --reqsub --maxjob 3 --lines 2 --qos debug --cpus_per_task 1 -mem_per_task 2G aa.sh  
+
+##get options from command line into variables and set default values
+my ($Partition, $Qos, $Maxjob, $Lines,$Reqsub, $Cpus_per_task, $Mem_per_task, $Job_prefix, $Interval, $job_completion_mark, $Show_screen, $cycle_num, $Help, $getmem);
+GetOptions(
+	"partition:s"        =>\$Partition,
+	"qos:s"              =>\$Qos,
+	"maxjob:i"           =>\$Maxjob,
+	"lines:i"            =>\$Lines,
+	"cycle_num:i"        =>\$cycle_num,
+	"cpus_per_task:i"    =>\$Cpus_per_task,
+	"mem_per_task:s"     =>\$Mem_per_task,
+	"reqsub"             =>\$Reqsub,
+	"jobprefix:s"        =>\$Job_prefix,
+	"interval:i"         =>\$Interval,
+	"job_cpt_mark:s"     =>\$job_completion_mark,
+	"show_screen"        =>\$Show_screen,
+	"help"               =>\$Help,
+	"getmem"             =>\$getmem,
+);
+$Partition ||= "intel-e5,amd-ep1,amd-ep2";
+$Qos ||= "normal";
+$Maxjob ||= 100;
+$Lines ||= 1;
+$Cpus_per_task ||= "1";
+$cycle_num ||= "3";
+# $Mem_per_task ||= $Cpus_per_task * 2500 . "M";
+$Job_prefix ||= "work";
+$Interval ||= 120;
+
+die `pod2text $0` if (@ARGV == 0 || $Help);
+
+my $work_shell_file = shift;
+$work_shell_file = abs_path($work_shell_file);
+
+my $work_shell_log = $work_shell_file.".$$.log";
+my $work_shell_file_error = $work_shell_file.".$$.err.sh";
+my $Work_dir = $work_shell_file.".$$.sbatch";
+my $work_shell_mem = $work_shell_file.".$$.mem.log";
+
+# my $work_shell_file_error = $work_shell_file.".log";
+# my $Work_dir = $work_shell_file.".sbatch";
+# my $work_shell_mem = $work_shell_file.".mem.log";
+
+my %meminfo=();
+my $current_dir = abs_path(".");
+
+my $whoami=`whoami`;
+chomp($whoami);
+my $time='`date +%F'."'  '".'%H:%M`';
+
+# 读取要执行的shell文件,并拆分为每个行数为 $Lines 的文件
+my $line_mark = 0;
+my $Job_mark="00001";
+mkdir($Work_dir);
+my @Shell;
+open (IN, "$work_shell_file") or die "Can not found $! \n";
+while(<IN>){
+	chomp;
+	s/\n|\r//g;
+	next unless($_);
+	if ($line_mark % $Lines ==0){
+	open(OUT, ">${Work_dir}/${Job_prefix}_${Job_mark}.sh") or die "Failed create $! \n";
+		print OUT "#!/bin/bash\n" . 'echo start at time ' . $time . "\n";
+		push @Shell,"$Job_prefix\_$Job_mark.sh";
+		$Job_mark++;
+	}
+	print OUT $_.' &&  echo This-Work-is-Completed!'."\n";
+	if ($line_mark % $Lines == $Lines - 1) {
+		print OUT 'echo finish at time '.$time."\n";
+		close OUT;
+	}
+	$line_mark++;
+}
+close IN;
+close OUT;
+
+print STDERR "make the qsub shell files done\n" if($Show_screen);
+
+my $sbatch_cycle = 1;
+while (@Shell){
+	my %Alljob; ## store all the job IDs of this cycle
+	my %Runjob; ## store the real running job IDs of this cycle
+	my %Error;  ## store the unfinished jobs of this cycle
+	chdir($Work_dir); ##enter into the qsub working directoy
+	my $job_cmd = "sbatch -c $Cpus_per_task ";  ## -l h_vmem=16G,s_core=8 sbatch -J llf-test -c 2 -p intel-debug,intel-e5 w.sh
+	if(defined $Partition){
+		$job_cmd .= "-p $Partition ";
+	}
+	if(defined $Qos){
+		if (($Partition eq 'intel-debug') or ($Partition eq 'amd-debug') or ($Partition eq 'intel-debug,amd-debug') or ($Partition eq 'amd-debug,intel-debug') ){
+			$job_cmd .= "-q debug ";
+		}else{
+			$job_cmd .= "-q $Qos ";
+		}
+	}
+	my @mem_array=();
+	if (defined $Mem_per_task){
+		@mem_array=split /,/,$Mem_per_task;
+		die "no valid mem resource\n" if(@mem_array<1);
+	}
+	my $part_mem;
+	for (my $i=0; $i<@Shell; $i++){
+		# print "=+++++++$Shell[$i]\n\n";
+		while (1){
+			my ($run_num,$meminfo_hash) = run_count(\%Alljob,\%Runjob,\%meminfo);
+			%meminfo = %{$meminfo_hash};
+			sleep 1;
+			if ($i < $Maxjob || ($run_num != -1 && $run_num < $Maxjob)) {
+				if (defined $Mem_per_task){
+					if(@mem_array>0){
+						$part_mem=shift @mem_array;
+					}
+				}
+				my $job_mem_cmd = "";
+				if ($part_mem){
+					$job_mem_cmd = "--mem=$part_mem ";
+				}
+				my $part_shell_abs = ${Work_dir}."/".basename($Shell[$i]);
+				my $part_shell_abs_e = ${Work_dir}."/".basename($Shell[$i]).'.%A.e';
+				my $part_shell_abs_o = ${Work_dir}."/".basename($Shell[$i]).'.%A.o';
+				
+				my $Job_prefix = "${i}_${Job_prefix}";
+				my $jod_return = `$job_cmd -J $Job_prefix $job_mem_cmd -e $part_shell_abs_e -o $part_shell_abs_o $part_shell_abs`;
+				# print "$job_cmd $job_mem_cmd -e $part_shell_abs_e -o $part_shell_abs_o $part_shell_abs\n";
+				my $job_id = $1 if($jod_return =~ /Submitted batch job (\d+)/);
+				$Alljob{$job_id} = $part_shell_abs;
+				# if ($sbatch_cycle ==1){
+					# $Alljob{$job_id} = $part_shell_abs;  ## job id => shell file name
+				# }else{
+					# $Alljob{$job_id} = $Shell[$i];
+				# }
+				print STDERR "throw job $job_id in the $sbatch_cycle cycle\n" if($Show_screen);	
+				last;
+			}else{
+				print STDERR "wait [${Interval}s] for throwing next job in the $sbatch_cycle cycle\n" if($Show_screen);
+				sleep $Interval;
+			}
+		}
+	}
+	
+	# 收集进程运行信息
+	###waiting for all jobs fininshed	
+	while (1) {
+		my ($run_num,$meminfo_hash) = run_count(\%Alljob,\%Runjob,\%meminfo);
+		%meminfo = %{$meminfo_hash};
+		
+		last if($run_num == 0);
+		print STDERR "There left $run_num jobs runing in the $sbatch_cycle cycle\n" if(defined $Show_screen);
+		
+		if(defined $getmem){ ### get mem ;  add by nixiaoming nixiaoming@genomics.cn
+			open GETMEM,'>',$work_shell_mem or die "can't open the mem info $work_shell_mem ";
+			print GETMEM "User:\t\t$whoami\nShellPath:\t$Work_dir\n";
+			foreach my $shname (sort keys %meminfo){
+				#print "=================$shname======\n";
+				my $jobinfo=$meminfo{$shname};
+				chomp $jobinfo;
+				print GETMEM "$whoami\t$shname\t$jobinfo\n";
+			}
+			close GETMEM;
+		}
+		sleep $Interval;
+	}
+	print STDERR "All jobs finished, in the firt cycle in the $sbatch_cycle cycle\n" if($Show_screen);
+	
+	# 收集运行状态日志文件并收集出错的执行文件
+	##run the secure mechanism to make sure all the jobs are really completed
+	open OUT, ">>$work_shell_log" || die "fail create $work_shell_log";
+	open ERRSH, ">>$work_shell_file_error" || die "fail create $work_shell_file_error";
+	chdir($Work_dir); 
+	foreach my $job_id (sort keys %Alljob) {
+		my $shell_file = $Alljob{$job_id};
+		# print "$job_id\t$shell_file\n";
+		##read the .o file
+		my $content;
+		if (-f "$shell_file.$job_id.o") {
+			$content = `tail -n 1000 $shell_file.$job_id.o`;
+		}
+		##check whether the job has been killed during running time
+		if ($content !~ /This-Work-is-Completed!/) {
+			$Error{$job_id} = $shell_file;
+			print OUT "In sbatch cycle $sbatch_cycle, In $shell_file.$job_id.o,  \"This-Work-is-Completed!\" is not found, so this work may be unfinished\n";
+		}
+		##read the .e file
+		my $content_e;
+		if (-f "$shell_file.$job_id.e") {
+			$content_e = `tail  -n 1000 $shell_file.$job_id.e`;
+		}
+		# if($content_e =~ /No such file or directory/){
+			# $Error{$job_id} = $shell_file;
+			# print OUT "In sbatch cycle $sbatch_cycle, In $shell_file.$job_id.e,  No such file or directory, so this work may be unfinished\n";
+		# }
+		if($content_e =~ /Bus error/){
+			$Error{$job_id} = $shell_file;
+			print OUT "In sbatch cycle $sbatch_cycle, In $shell_file.$job_id.e,  Bus error (core dumped), so this work may be unfinished\n";
+		}elsif($content_e =~ /slurmstepd: error/ and $content_e =~ /NODE FAILURE/){
+			$Error{$job_id} = $shell_file;
+			print OUT "In sbatch cycle $sbatch_cycle, In $shell_file.$job_id.e,  slurmstepd: error, so this work may be unfinished\n";
+		}elsif($content_e =~ /No such file or directory/ and ($content_e =~ /Error/ or $content_e =~ /error/)){
+			$Error{$job_id} = $shell_file;
+			print OUT "In sbatch cycle $sbatch_cycle, In $shell_file.$job_id.e,  'No such file or directory', so this work may be unfinished\n";
+		}
+		
+		##check the user defined job completion mark
+		if (defined $job_completion_mark && $content_e !~ /$job_completion_mark/) {
+			$Error{$job_id} = $shell_file;
+			print OUT "In sbatch cycle $sbatch_cycle, In $shell_file.$job_id.e,  \"$job_completion_mark\" is not found, so this work may be unfinished\n";
+		}
+	}
+	# 前面所有的进程结束,跳出循环
+	@Shell = ();
+	foreach my $job_id (sort keys %Error) {
+		my $shell_file = $Error{$job_id};
+		push @Shell,$shell_file;
+	}
+	
+	$sbatch_cycle++;
+	if($sbatch_cycle > $cycle_num){
+		print OUT "\n\nProgram stopped because the reqsub cycle number has reached $cycle_num, the following jobs unfinished:\n";
+		foreach my $job_id (sort keys %Error) {
+			my $shell_file = $Error{$job_id};
+			open (S, "$shell_file") or die "Can not found $! \n";
+			while(<S>){
+				chomp;
+				s/\n|\r//g;
+				next unless($_);
+				next if($_ =~ /^#!\/bin\/bash/);
+				next if($_ =~ /^echo start at time/);
+				next if($_ =~ /^echo finish at time/);
+				if ($_ =~ /(.+)\s+&&\s+echo This-Work-is-Completed!/){#&&  echo This-Work-is-Completed!
+					print ERRSH $1."\n"; 
+				}
+			}
+			close S;
+			# print ERRSH $shell_file."\n";
+		}
+		print OUT "Please check carefully for what errors happen, and redo the work, good luck!";
+		die "\nProgram stopped because the reqsub cycle number has reached 10\n";
+	}
+
+	print OUT "All jobs finished!\n" unless(@Shell);
+
+	chdir($current_dir); ##return into original directory
+	close OUT;
+	close ERRSH;
+	print STDERR "The secure mechanism is performed in the $sbatch_cycle cycle\n" if($Show_screen);
+
+	last unless(defined $Reqsub);
+}
+
+
+if(defined $getmem){ ### get mem ;  add by nixiaoming nixiaoming@genomics.cn
+	open GETMEM,'>',$work_shell_mem or die "can't open the mem info $work_shell_mem ";
+	print GETMEM "User:\t\t$whoami\nShellPath:\t$Work_dir\n";
+	foreach my $shname (sort keys %meminfo){
+		# print "=================$shname======\n";
+		my $jobinfo=$meminfo{$shname};
+		chomp $jobinfo;
+		print GETMEM "$whoami\t$shname\t$jobinfo\n";
+	}
+	close GETMEM;
+}
+
+my $endtime=` date +"%F %T" `;
+chomp $endtime;
+print STDERR "\nsbatch.pl at $endtime finished\n" if($Show_screen);
+
+
+####################################################
+################### Sub Routines ###################
+####################################################
+
+sub run_count{
+	my ($Alljob_str, $Runjob_str, $meminfo_str) = @_;
+	my $run_num = 0;
+	my %Alljob_hash = %$Alljob_str; 
+	my %meminfo_hash = %$meminfo_str; 
+	%$Runjob_str = ();
+	
+	my $user = $ENV{"USER"} || $ENV{"USERNAME"};
+	my $squeue_result = `squeue -u $user`;
+	
+	# print "$squeue_result\n";
+	
+	$user = substr($user, 0, 8);
+	if ($squeue_result =~ /failed receiving gdi request/ || ($squeue_result !~ /^\s*$/ && $squeue_result !~ /JOBID/)) {
+		$run_num = -1;
+		return $run_num; ##系统无反应
+	}
+	my @jobs = split /\n/,$squeue_result;
+	my $first_line = shift @jobs;
+	foreach my $job_line (@jobs) {
+		$job_line =~s/^\s+//;
+		# print "---$job_line\n";
+		
+		my @job_field = split /\s+/,$job_line; # JOBID PARTITION NAME USER ST TIME  NODES NODELIST(REASON)
+		
+		# print "pid---$job_field[0]\n";
+		# print "$job_field[0]\t$job_field[1]\t$job_field[2]\t$job_field[3]\t$job_field[4]\t$job_field[5]\t$job_field[6]\t$job_field[7]\n";
+		
+		next if($job_field[3] ne $user);
+		my $jobinfo=`scontrol show job=$job_field[0]`;
+		chomp($jobinfo);
+		$jobinfo =~ s/\n/ /g;
+		# print "$jobinfo\n";
+		if (exists $Alljob_hash{$job_field[0]}){
+			if ($job_field[4] eq "PD" || $job_field[4] eq "R" || $job_field[4] eq "S" || $job_field[4] eq "CD" || $job_field[4] eq "CG"){
+				$Runjob_str->{$job_field[0]} = $job_field[2];
+				$run_num++;
+				if ((defined $getmem) && ($job_field[4] eq "R")){### get mem ;  add by nixiaoming nixiaoming@genomics.cn
+					my $sub_shell_name = basename($Alljob_hash{$job_field[0]});
+					if (!exists $meminfo_hash{$sub_shell_name}){
+						$meminfo_hash{$sub_shell_name} = $jobinfo;
+					}
+					
+					# print "---$meminfo_hash{$Alljob_hash{$job_field[0]}}----$Alljob_hash{$job_field[0]}--\n";
+				}
+			}else{
+				`scancel $job_field[0]`;
+			}
+		}
+	}
+	# print "run_num----$run_num\n";
+	return ($run_num, \%meminfo_hash);
+}
