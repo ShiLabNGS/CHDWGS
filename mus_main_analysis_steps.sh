@@ -82,7 +82,8 @@ python /storage/shihongjunLab/liulifeng/workflow/scripts/mus_hsa_wkf/tmp/2000_mu
 
 # s7. Exclude Olfr_rik_Vmn_Krtap_Tas1r_Tas2r_gene from the database, modify the files starting with d_, and calculate the p value
 python /storage/shihongjunLab/liulifeng/workflow/scripts/mus_hsa_wkf/tmp/2000_mus/js_p_value.py --metasvm_file /storage/shihongjunLab/liulifeng/project/03_lxx_220912_2000_mus_wgs/exon/3.analysis_raw_vcf/07.get_aa_coding_avg_mut_ratio_from_my_sift4g_db_uniref100/02.trans_mut_rate_weighting_max_sift4g/trans.lengthest.mut.rate.n.xls -i gene.counts_le_01_gq_80_f_0_2.matrix.gene.max.xls -o sifg4g_stat_exclude_gene.20230822.csv  
-
+## s7.1 add Storey’s q-value
+Rscript /storage/shihongjunLab/liulifeng/workflow/scripts/mus_hsa_wkf/tmp/2000_mus/mus_p_q_value.R # get file : sifg4g_stat_exclude_gene.20230822.add_qvalues.txt 
 
 # s8. other statistics
 ## s8.1 The proportion of each mutation type

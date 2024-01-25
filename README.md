@@ -1,6 +1,6 @@
-# Dysregulated fetal heart contraction underlies complex genetics of congenital heart disease
+# Increased mutation rate of cardiac contraction genes in mouse and human congenital heart disease
 
-Xiaoxi Luo , Lifeng Liu , Haowei Rong , Xiangyang Liu , Hongjun Shi
+Xiaoxi Luo , Lifeng Liu , Haowei Rong , Xiangyang Liu , Ling Yang , Nan Li, Hongjun Shi
 
 ## [Introduction](https://github.com/ShiLabNGS/CHDWGS#introduction)
 
@@ -55,7 +55,7 @@ perl /storage/shihongjunLab/liulifeng/project/00_llf_workflow_mus_wgs/test/wes_w
 * `gatk_steps.sh` : Variation detection and annotation in human samples
 * `hsa_case_control_comparison.sh`: Main script for case control comparison
 
-* `gene_group_hsa_and_mus.sh`: Gene groups with multiple shared rare damaging mutations in one mouse and at least two unrelated human
+* `gco_gene_hsa_and_mus.sh`: Gene groups with multiple shared rare damaging mutations in one mouse and at least two unrelated human
 
 
 
