@@ -85,21 +85,24 @@ python /storage/shihongjunLab/liulifeng/workflow/scripts/mus_hsa_wkf/tmp/2000_mu
 ## s7.1 add Storey’s q-value
 Rscript /storage/shihongjunLab/liulifeng/workflow/scripts/mus_hsa_wkf/tmp/2000_mus/mus_p_q_value.R # get file : sifg4g_stat_exclude_gene.20230822.add_qvalues.txt 
 
-# s8. other statistics
-## s8.1 The proportion of each mutation type
+# s8 
+sh mgi_mp.sh
+
+# s9. other statistics
+## s9.1 The proportion of each mutation type
 perl -F"\t" -alne '@a=split(":",$F[2]);@b = split(">", $a[-1]);if($F[7]=~/splicing|startloss|stopgain|stoploss/){if(length($b[0]) > length($b[1])){print "frameshift_deletion"}elsif(length($b[0]) < length($b[1])){print "frameshift_insertion"}else{print $F[7]}}else{print $F[7]}' b.selected_for_analysis.counts_le_01_gq_80_f_0_2.matrix.gene.max.xls|sort|uniq -c|awk '{print $2"\t"$1}' > mutation_type.txt
 
-## s8.2 mutation distribution
+## s9.2 mutation distribution
 awk '{print $3}' b.selected_for_analysis.counts_le_01_gq_80_f_0_2.matrix.gene.max.xls |cut -d":" -f 3|sort|uniq -c|awk '{print $2"\t"$1}' > mutation_distribution.txt
 perl -F"\t" -alne 'if (length($F[0]) ==3){print $_}' mutation_distribution.txt > snp_mutation_distribution.txt
 
-## s8.3 case/ctl groups count base distribution respectively
+## s9.3 case/ctl groups count base distribution respectively
 awk '$4==1{print $3}' b.selected_for_analysis.counts_le_01_gq_80_f_0_2.matrix.gene.max.xls|cut -d":" -f 3|sort|uniq -c|awk '{print $2"\t"$1}' > mutation_distribution.case.txt && perl -F"\t" -alne 'if (length($F[0]) ==3){print $_}' mutation_distribution.case.txt > snp_mutation_distribution.case.txt && rm mutation_distribution.case.txt
 awk '$5==1{print $3}' b.selected_for_analysis.counts_le_01_gq_80_f_0_2.matrix.gene.max.xls|cut -d":" -f 3|sort|uniq -c|awk '{print $2"\t"$1}' > mutation_distribution.ctl.txt && perl -F"\t" -alne 'if (length($F[0]) ==3){print $_}' mutation_distribution.ctl.txt > snp_mutation_distribution.ctl.txt && rm mutation_distribution.ctl.txt
 
-## 8.4 Count the number of mutations in each sample
+## s9.4 Count the number of mutations in each sample
 python /storage/shihongjunLab/liulifeng/workflow/scripts/mus_hsa_wkf/tmp/2000_mus/mutation_num_per_samples.py -i b.selected_for_analysis.counts_le_01_gq_80_f_0_2.matrix.gene.max.xls -o a.stat
 
-## s8.5 Number of synonymous mutant genes
+## s9.5 Number of synonymous mutant genes
 python /storage/shihongjunLab/liulifeng/workflow/scripts/mus_hsa_wkf/tmp/2000_mus/stat_samples_num_syn.py  b.selected_for_analysis.counts_le_01_gq_80_f_0_2.matrix.gene.max.xls gene.counts_le_01_gq_80_f_0_2.matrix.gene.max_syn.xls  
 

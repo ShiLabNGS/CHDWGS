@@ -42,6 +42,7 @@ perl /storage/shihongjunLab/liulifeng/project/00_llf_workflow_mus_wgs/test/wes_w
 * `mus_main_analysis_steps.sh` ：The key steps of data analysis, there are many steps in it
   * Remove related samples
   * sift database annotation
+  * Mammalian Phenotype Ontology analysis
   * Statistical Analysis
 
 ### For the human analysis:
