@@ -1,4 +1,4 @@
-# Increased mutation rate of cardiac contraction genes in mouse and human congenital heart disease
+# ENU-based dominant genetic screen identifies contractile and neuronal gene mutations in congenital heart disease
 
 Xiaoxi Luo , Lifeng Liu , Haowei Rong , Xiangyang Liu , Ling Yang , Nan Li, Hongjun Shi
 
